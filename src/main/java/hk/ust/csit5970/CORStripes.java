@@ -15,255 +15,275 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Logger;
+import org.apache.hadoop.fs.FileStatus;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.lang.String;
 import java.util.*;
 
 /**
  * Compute the bigram count using "pairs" approach
  */
 public class CORStripes extends Configured implements Tool {
-	private static final Logger LOG = Logger.getLogger(CORStripes.class);
+    private static final Logger LOG = Logger.getLogger(CORStripes.class);
 
-	/*
-	 * TODO: write your first-pass Mapper here.
-	 */
-	private static class CORMapper1 extends
-			Mapper<LongWritable, Text, Text, IntWritable> {
-		@Override
-		public void map(LongWritable key, Text value, Context context)
-				throws IOException, InterruptedException {
-			HashMap<String, Integer> word_set = new HashMap<String, Integer>();
-			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+    /*
+     * TODO: write your first-pass Mapper here.
+     */
+    private static class CORMapper1 extends
+            Mapper<LongWritable, Text, Text, IntWritable> {
+        @Override
+        public void map(LongWritable key, Text value, Context context)
+                throws IOException, InterruptedException {
+            HashMap<String, Integer> word_set = new HashMap<String, Integer>();
+            // Please use this data structure to keep track of the words in a line
+            // Reuse objects
+            Text word = new Text();
+            IntWritable one = new IntWritable(1);
+            String line = ((Text) value).toString();
+            String[] words = line.trim().split("\\s+");
+            /*
+             * TODO: Your implementation goes here.
+             */
+            for (String w : words) {
+                String cleanWord = w.replaceAll("[^a-zA-Z]", "").toLowerCase().trim();
+                if (cleanWord.isEmpty()) {
+                    continue;
+                }
+                if (!word_set.containsKey(cleanWord)) {
+                    word_set.put(cleanWord, 1);
+                    word.set(cleanWord);
+                    context.write(word, one);
+                }
+            }
+        }
+    }
 
-	/*
-	 * TODO: Write your first-pass reducer here.
-	 */
-	private static class CORReducer1 extends
-			Reducer<Text, IntWritable, Text, IntWritable> {
-		@Override
-		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+    /*
+     * TODO: write your first-pass Reducer here.
+     */
+    private static class CORReducer1 extends
+            Reducer<Text, IntWritable, Text, IntWritable> {
+        @Override
+        public void reduce(Text key, Iterable<IntWritable> values,
+                Context context) throws IOException, InterruptedException {
+            /*
+             * TODO: Your implementation goes here.
+             */
+            int sum = 0;
+            for (IntWritable value : values) {
+                sum += value.get();
+            }
+            context.write(key, new IntWritable(sum));
+        }
+    }
 
-	/*
-	 * TODO: Write your second-pass Mapper here.
-	 */
-	public static class CORStripesMapper2 extends Mapper<LongWritable, Text, Text, MapWritable> {
-		@Override
-		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-			Set<String> sorted_word_set = new TreeSet<String>();
-			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			String doc_clean = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizers = new StringTokenizer(doc_clean);
-			while (doc_tokenizers.hasMoreTokens()) {
-				sorted_word_set.add(doc_tokenizers.nextToken());
-			}
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+    /*
+     * TODO: write your second-pass Mapper here.
+     */
+    private static class CORStripesMapper2 extends Mapper<LongWritable, Text, PairOfStrings, DoubleWritable> {
+        private final static PairOfStrings PAIR = new PairOfStrings();
+        private final static DoubleWritable ONE = new DoubleWritable(1.0); // Representing a count of 1.0
 
-	/*
-	 * TODO: Write your second-pass Combiner here.
-	 */
-	public static class CORStripesCombiner2 extends Reducer<Text, MapWritable, Text, MapWritable> {
-		static IntWritable ZERO = new IntWritable(0);
+        @Override
+        public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+            TreeSet<String> word_set = new TreeSet<String>();
+            String line = value.toString();
+            String[] words = line.trim().split("\\s+");
 
-		@Override
-		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+            for (String w : words) {
+                String cleanWord = w.replaceAll("[^a-zA-Z]", "").toLowerCase().trim();
+                if (!cleanWord.isEmpty()) {
+                    word_set.add(cleanWord);
+                }
+            }
 
-	/*
-	 * TODO: Write your second-pass Reducer here.
-	 */
-	public static class CORStripesReducer2 extends Reducer<Text, MapWritable, PairOfStrings, DoubleWritable> {
-		private static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
-		private static IntWritable ZERO = new IntWritable(0);
+            for (String w1 : word_set) {
+                for (String w2 : word_set.tailSet(w1)) {
+                    if (!w2.equals(w1)) {
+                        PAIR.set(w1, w2);
+                        context.write(PAIR, ONE); // Emit the pair with a count of 1.0
+                    }
+                }
+            }
+        }
+    }
 
-		/*
-		 * Preload the middle result file.
-		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
-		 */
-		@Override
-		protected void setup(Context context) throws IOException, InterruptedException {
-			Path middle_result_path = new Path("mid/part-r-00000");
-			Configuration middle_conf = new Configuration();
-			try {
-				FileSystem fs = FileSystem.get(URI.create(middle_result_path.toString()), middle_conf);
+    /*
+     * TODO: write your second-pass Reducer here.
+     */
+    private static class CORStripesReducer2 extends Reducer<Text, DoubleWritable, PairOfStrings, DoubleWritable> { // Change the value type here
+        private HashMap<String, Integer> word_total_map = new HashMap<String, Integer>();
 
-				if (!fs.exists(middle_result_path)) {
-					throw new IOException(middle_result_path.toString() + "not exist!");
-				}
+        @Override
+        public void setup(Context context) throws IOException {
+            Configuration conf = context.getConfiguration();
+            FileSystem fs = FileSystem.get(conf);
+            readMiddleResults(context, word_total_map);
+        }
 
-				FSDataInputStream in = fs.open(middle_result_path);
-				InputStreamReader inStream = new InputStreamReader(in);
-				BufferedReader reader = new BufferedReader(inStream);
+        private static void readMiddleResults(Context context, HashMap<String, Integer> word_total_map) throws IOException {
+            Configuration conf = context.getConfiguration();
+            FileSystem fs = FileSystem.get(conf);
+            Path middleDir = new Path("mid");
+            FileStatus[] files = fs.listStatus(middleDir);
+            for (FileStatus file : files) {
+                if (file.getPath().getName().startsWith("part-r-")) {
+                    FSDataInputStream in = fs.open(file.getPath());
+                    BufferedReader br = new BufferedReader(new InputStreamReader(in));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String[] parts = line.split("\\s+");
+                        word_total_map.put(parts[0], Integer.parseInt(parts[1]));
+                    }
+                    br.close();
+                    in.close();
+                }
+            }
+        }
 
-				LOG.info("reading...");
-				String line = reader.readLine();
-				String[] line_terms;
-				while (line != null) {
-					line_terms = line.split("\t");
-					word_total_map.put(line_terms[0], Integer.valueOf(line_terms[1]));
-					LOG.info("read one line!");
-					line = reader.readLine();
-				}
-				reader.close();
-				LOG.info("finished！");
-			} catch (Exception e) {
-				System.out.println(e.getMessage());
-			}
-		}
+        @Override
+        public void reduce(Text key, Iterable<DoubleWritable> values, Context context) throws IOException, InterruptedException { // Change the value type here
+            double sum = 0.0;
+            for (DoubleWritable value : values) {
+                sum += value.get();
+            }
 
-		/*
-		 * TODO: Write your second-pass Reducer here.
-		 */
-		@Override
-		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+            PairOfStrings pair = new PairOfStrings();
+            DoubleWritable cor = new DoubleWritable();
+            String w1 = key.toString();
 
-	/**
-	 * Creates an instance of this tool.
-	 */
-	public CORStripes() {
-	}
+            for (Map.Entry<String, Integer> entry : word_total_map.entrySet()) { // Iterate through word_total_map for all w2's
+                String w2 = entry.getKey();
+                if (w2.compareTo(w1) > 0) { // Ensure w1 < w2 lexicographically
+                    double frequencyW1 = word_total_map.get(w1);
+                    double frequencyW2 = word_total_map.get(w2);
+                    pair.set(w1, w2);
+                    cor.set(sum / (frequencyW1 * frequencyW2)); // Use the calculated sum
+                    context.write(pair, cor);
+                }
+            }
+        }
+    }
 
-	private static final String INPUT = "input";
-	private static final String OUTPUT = "output";
-	private static final String NUM_REDUCERS = "numReducers";
+    /**
+     * Creates an instance of this tool.
+     */
+    public CORStripes() {
+    }
 
-	/**
-	 * Runs this tool.
-	 */
-	@SuppressWarnings({ "static-access" })
-	public int run(String[] args) throws Exception {
-		Options options = new Options();
+    private static final String INPUT = "input";
+    private static final String OUTPUT = "output";
+    private static final String NUM_REDUCERS = "numReducers";
 
-		options.addOption(OptionBuilder.withArgName("path").hasArg()
-				.withDescription("input path").create(INPUT));
-		options.addOption(OptionBuilder.withArgName("path").hasArg()
-				.withDescription("output path").create(OUTPUT));
-		options.addOption(OptionBuilder.withArgName("num").hasArg()
-				.withDescription("number of reducers").create(NUM_REDUCERS));
+    /**
+     * Runs this tool.
+     */
+    @SuppressWarnings({"static-access"})
+    public int run(String[] args) throws Exception {
+        Options options = new Options();
 
-		CommandLine cmdline;
-		CommandLineParser parser = new GnuParser();
+        options.addOption(OptionBuilder.withArgName("path").hasArg()
+                .withDescription("input path").create(INPUT));
+        options.addOption(OptionBuilder.withArgName("path").hasArg()
+                .withDescription("output path").create(OUTPUT));
+        options.addOption(OptionBuilder.withArgName("num").hasArg()
+                .withDescription("number of reducers").create(NUM_REDUCERS));
 
-		try {
-			cmdline = parser.parse(options, args);
-		} catch (ParseException exp) {
-			System.err.println("Error parsing command line: "
-					+ exp.getMessage());
-			return -1;
-		}
+        CommandLine cmdline;
+        CommandLineParser parser = new GnuParser();
 
-		// Lack of arguments
-		if (!cmdline.hasOption(INPUT) || !cmdline.hasOption(OUTPUT)) {
-			System.out.println("args: " + Arrays.toString(args));
-			HelpFormatter formatter = new HelpFormatter();
-			formatter.setWidth(120);
-			formatter.printHelp(this.getClass().getName(), options);
-			ToolRunner.printGenericCommandUsage(System.out);
-			return -1;
-		}
+        try {
+            cmdline = parser.parse(options, args);
+        } catch (ParseException exp) {
+            System.err.println("Error parsing command line: "
+                    + exp.getMessage());
+            return -1;
+        }
 
-		String inputPath = cmdline.getOptionValue(INPUT);
-		String middlePath = "mid";
-		String outputPath = cmdline.getOptionValue(OUTPUT);
+        // Lack of arguments
+        if (!cmdline.hasOption(INPUT) || !cmdline.hasOption(OUTPUT)) {
+            System.out.println("args: " + Arrays.toString(args));
+            HelpFormatter formatter = new HelpFormatter();
+            formatter.setWidth(120);
+            formatter.printHelp(this.getClass().getName(), options);
+            ToolRunner.printGenericCommandUsage(System.out);
+            return -1;
+        }
 
-		int reduceTasks = cmdline.hasOption(NUM_REDUCERS) ? Integer
-				.parseInt(cmdline.getOptionValue(NUM_REDUCERS)) : 1;
+        String inputPath = cmdline.getOptionValue(INPUT);
+        String middlePath = "mid";
+        String outputPath = cmdline.getOptionValue(OUTPUT);
 
-		LOG.info("Tool: " + CORStripes.class.getSimpleName());
-		LOG.info(" - input path: " + inputPath);
-		LOG.info(" - middle path: " + middlePath);
-		LOG.info(" - output path: " + outputPath);
-		LOG.info(" - number of reducers: " + reduceTasks);
+        int reduceTasks = cmdline.hasOption(NUM_REDUCERS) ?
+                Integer
+                        .parseInt(cmdline.getOptionValue(NUM_REDUCERS)) : 1;
 
-		// Setup for the first-pass MapReduce
-		Configuration conf1 = new Configuration();
+        LOG.info("Tool: " + CORStripes.class.getSimpleName());
+        LOG.info(" - input path: " + inputPath);
+        LOG.info(" - middle path: " + middlePath);
+        LOG.info(" - output path: " + outputPath);
+        LOG.info(" - number of reducers: " + reduceTasks);
 
-		Job job1 = Job.getInstance(conf1, "Firstpass");
+        // Setup for the first-pass MapReduce
+        Configuration conf1 = new Configuration();
+        Job job1 = Job.getInstance(conf1, "Firstpass");
 
-		job1.setJarByClass(CORStripes.class);
-		job1.setMapperClass(CORMapper1.class);
-		job1.setReducerClass(CORReducer1.class);
-		job1.setOutputKeyClass(Text.class);
-		job1.setOutputValueClass(IntWritable.class);
+        job1.setJarByClass(CORStripes.class);
+        job1.setMapperClass(CORMapper1.class);
+        job1.setReducerClass(CORReducer1.class);
+        job1.setOutputKeyClass(Text.class);
+        job1.setOutputValueClass(IntWritable.class);
 
-		FileInputFormat.setInputPaths(job1, new Path(inputPath));
-		FileOutputFormat.setOutputPath(job1, new Path(middlePath));
+        FileInputFormat.setInputPaths(job1, new Path(inputPath));
+        FileOutputFormat.setOutputPath(job1, new Path(middlePath));
+        // Delete the output directory if it exists already.
+        Path middleDir = new Path(middlePath);
+        FileSystem.get(conf1).delete(middleDir, true);
+        // Time the program
+        long startTime = System.currentTimeMillis();
+        job1.waitForCompletion(true);
+        LOG.info("Job 1 Finished in " + (System.currentTimeMillis() - startTime)
+                / 1000.0 + " seconds");
+        // Setup for the second-pass MapReduce
 
-		// Delete the output directory if it exists already.
-		Path middleDir = new Path(middlePath);
-		FileSystem.get(conf1).delete(middleDir, true);
+        // Delete the output directory if it exists already.
+        Path outputDir = new Path(outputPath);
+        FileSystem.get(conf1).delete(outputDir, true);
 
-		// Time the program
-		long startTime = System.currentTimeMillis();
-		job1.waitForCompletion(true);
-		LOG.info("Job 1 Finished in " + (System.currentTimeMillis() - startTime)
-				/ 1000.0 + " seconds");
+        Configuration conf2 = new Configuration();
+        Job job2 = Job.getInstance(conf2, "Secondpass");
 
-		// Setup for the second-pass MapReduce
+        job2.setJarByClass(CORStripes.class);
+        job2.setMapperClass(CORStripesMapper2.class);
+        //job2.setCombinerClass(CORStripesCombiner2.class); //Remove the combiner
+        job2.setReducerClass(CORStripesReducer2.class);
 
-		// Delete the output directory if it exists already.
-		Path outputDir = new Path(outputPath);
-		FileSystem.get(conf1).delete(outputDir, true);
+        job2.setOutputKeyClass(PairOfStrings.class);
+        job2.setOutputValueClass(DoubleWritable.class);
+        job2.setMapOutputKeyClass(Text.class);
+        job2.setMapOutputValueClass(DoubleWritable.class); // Change to DoubleWritable
+        job2.setNumReduceTasks(reduceTasks);
 
+        FileInputFormat.setInputPaths(job2, new Path(inputPath));
+        FileOutputFormat.setOutputPath(job2, new Path(outputPath));
 
-		Configuration conf2 = new Configuration();
-		Job job2 = Job.getInstance(conf2, "Secondpass");
+        // Time the program
+        startTime = System.currentTimeMillis();
+        job2.waitForCompletion(true);
+        LOG.info("Job 2 Finished in " + (System.currentTimeMillis() - startTime)
+                / 1000.0 + " seconds");
 
-		job2.setJarByClass(CORStripes.class);
-		job2.setMapperClass(CORStripesMapper2.class);
-		job2.setCombinerClass(CORStripesCombiner2.class);
-		job2.setReducerClass(CORStripesReducer2.class);
+        return 0;
+    }
 
-		job2.setOutputKeyClass(PairOfStrings.class);
-		job2.setOutputValueClass(DoubleWritable.class);
-		job2.setMapOutputKeyClass(Text.class);
-		job2.setMapOutputValueClass(MapWritable.class);
-		job2.setNumReduceTasks(reduceTasks);
-
-		FileInputFormat.setInputPaths(job2, new Path(inputPath));
-		FileOutputFormat.setOutputPath(job2, new Path(outputPath));
-
-		// Time the program
-		startTime = System.currentTimeMillis();
-		job2.waitForCompletion(true);
-		LOG.info("Job 2 Finished in " + (System.currentTimeMillis() - startTime)
-				/ 1000.0 + " seconds");
-
-		return 0;
-	}
-
-	/**
-	 * Dispatches command-line arguments to the tool via the {@code ToolRunner}.
-	 */
-	public static void main(String[] args) throws Exception {
-		ToolRunner.run(new CORStripes(), args);
-	}
+    /**
+     * Dispatches command-line arguments to the tool via the {@code ToolRunner}.
+     */
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new CORStripes(), args);
+    }
 }
