@@ -1,0 +1,5 @@
+====BigramFrePairs==== Mark: 2/2
+====BigramFreStripes==== Mark: 0/2: list index out of range
+====CorPairs==== Mark: 0/3 [line 0: words <['a', 'about', '0.125']> != <['Above', 'Also', '1.0']>]
+====CorStrip==== Mark: 0/3: list index out of range
+====Total Mark: 2/10
